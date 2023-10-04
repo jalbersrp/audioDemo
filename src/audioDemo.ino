@@ -2,6 +2,7 @@
 #include <SdFatSequentialFileRK.h>
 #include <SdFatWavRK.h>
 #include <arduinoFFT.h>
+#include <libmfcc.h>
 
 //Logging
 SYSTEM_THREAD(ENABLED);													//Threading enabled
@@ -23,6 +24,9 @@ const double samplingFrequency = 16000;									//Sampling frequency (used by PD
 double vReal[samples]={0.0};											//Vector for samples (real part) to be analyzed
 double vImag[samples]={0.0};											//Vector for samples (imaginary part) to be analyzed
 double dominantFreq = 0.0;												//Stores the dominant frequency calculated
+//MFCC
+unsigned int coeffNumber = 13;											//Number of coeff to compute
+unsigned int numFilters = 48;											//Number of filters to be applied
 // Record
 const unsigned long MAX_RECORDING_LENGTH_MS = 5 * 1000;					//Limits the recording length if MODE button is not pressed again
 unsigned long recordingStart;											//Stores the start time for a recording
@@ -152,6 +156,11 @@ void loop()
 		}
 		
 		//Performs FFT
+		//vReal				-	Array with real values of the samples taken
+		//vImag				-	Array with imaginary values (initialized as zeros)
+		//samples			-	Number of samples in the vReal array (must be power of 2)
+		//samplingFrequency	-	Sample rate of the data in vReal (samples/s)
+		//NOTE: The result is stored in the input array, the original sample values are destroyed
 		FFT = arduinoFFT(vReal, vImag, samples, samplingFrequency);		//Create FFT object from real/imaginary data sampled, number of samples and the sampling frequency
 		FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);				//Weights the data
 		FFT.Compute(FFT_FORWARD);										//Computes FFT
@@ -164,7 +173,30 @@ void loop()
 		if(!Particle.publish("dFrequency", String(dominantFreq)))
 		{
 			Log.info("Can't publish to cloud.");
-		}					
+		}
+
+		//Computes the specified MFCC coefficient
+		//vReal 			- 	Array of doubles containing the results of FFT computation. This data is already assumed to be purely real
+		//samplingFrequency - 	The rate that the original time-series data was sampled at (i.e 16000)
+		//numFilters 		- 	The number of filters to use in the computation. Recommended value = 48
+		//samples 			- 	The size of the vReal array, usually a power of 2
+		//coeff 			-	The mth MFCC coefficient to compute
+		double mfcc_result[coeffNumber];										//Initalizes the result coeff array
+		String s = "";															//Result string for publish. NOTE: Photon 2 publish field limit is 1024 characters
+		Log.info("MFCC results");
+		for(unsigned int coeff = 0; coeff < coeffNumber; coeff++)
+		{
+			mfcc_result[coeff] = GetCoefficient(vReal, samplingFrequency, numFilters, samples, coeff);
+			Log.info("Coeff %d: %f",coeff+1,mfcc_result[coeff]);
+			s = s + String::format("%f,", mfcc_result[coeff]);
+		}
+
+		//Publishes the coeffs to the cloud
+		if(!Particle.publish("coeff",s))
+		{
+			Log.info("Can't publish to cloud.");
+		}		
+		
 		state = STATE_WAITING;											//Jumps to WAITING state
 		break;
 	}

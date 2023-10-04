@@ -1,35 +1,36 @@
-# audioDemo
+# Audio Demo
 
-A Particle project named audioDemo
+This demo shows audio processing in the Particle photon 2
 
-## Welcome to your project!
+The project takes 5 seconds of audio samples from the PDM microphone module and stores it in a SD card using .wav format with auto-incremental naming. Then it takes the first second of the saved sampling and performs FFT and MFCC computing to obtain the domimnant frequency and MFCC coefficients. Next it publishes the results on the particle cloud. The device is suscribed to an event from the cloud that can turn ON and OFF a relay module.
 
-Every new Particle project is composed of 3 important elements that you'll see have been created in your project directory for audioDemo.
+For triggering a sampling event, is possible to press the MODE button on the device or calling a function from cloud.
 
-#### ```/src``` folder:  
-This is the source folder that contains the firmware files for your project. It should *not* be renamed. 
-Anything that is in this folder when you compile your project will be sent to our compile service and compiled into a firmware binary for the Particle device that you have targeted.
 
-If your application contains multiple files, they should all be included in the `src` folder. If your firmware depends on Particle libraries, those dependencies are specified in the `project.properties` file referenced below.
+Compiled using VScode Particle Workbench 1.16.10 for deviceOS 5.5.0 and Photon 2.
 
-#### ```.ino``` file:
-This file is the firmware that will run as the primary application on your Particle device. It contains a `setup()` and `loop()` function, and can be written in Wiring or C/C++. For more information about using the Particle firmware API to create firmware for your Particle device, refer to the [Firmware Reference](https://docs.particle.io/reference/firmware/) section of the Particle documentation.
+### Cloud functions
+Available from the console or cloud API:
+* `audioSample` - Call this function to trigger a sampling and analysis event from cloud. Takes no arguments.
+* `relayControl` - Call this function with "OFF" or "ON" arguments to control the relay. Arguments: "OFF" , "ON". Whitout quotes.
 
-#### ```project.properties``` file:  
-This is the file that specifies the name and version number of the libraries that your project depends on. Dependencies are added automatically to your `project.properties` file when you add a library to a project using the `particle library add` command in the CLI or add a library in the Desktop IDE.
+### Cloud events
+Responses from the device to the cloud:
+* `dFrequency` - Dominant frequency value from the last sampling event.
+* `coeff` - MFCC coefficient values from the last sampling event.
 
-## Adding additional files to your project
+## Wiring
+Photon 2 | SD module | PDM MIC | Relay module | Notes 
+--- | --- | --- | --- | ---
+GND|GND|GND|GND
+VUSB|-|-|*|
+3V3 | 3V3 | 3V | * |
+S3  | CS |-|-
+MO  |MOSI|-|-
+MI|MISO|-|-
+SCK| SCK|-|-
+A1 | -|DAT|-
+A0 | -|CLK|-
+S4|-|-|S1|Input signal is inverted in the module (0V is ON)
 
-#### Projects with multiple sources
-If you would like add additional files to your application, they should be added to the `/src` folder. All files in the `/src` folder will be sent to the Particle Cloud to produce a compiled binary.
-
-#### Projects with external libraries
-If your project includes a library that has not been registered in the Particle libraries system, you should create a new folder named `/lib/<libraryname>/src` under `/<project dir>` and add the `.h`, `.cpp` & `library.properties` files for your library there. Read the [Firmware Libraries guide](https://docs.particle.io/guide/tools-and-features/libraries/) for more details on how to develop libraries. Note that all contents of the `/lib` folder and subfolders will also be sent to the Cloud for compilation.
-
-## Compiling your project
-
-When you're ready to compile your project, make sure you have the correct Particle device target selected and run `particle compile <platform>` in the CLI or click the Compile button in the Desktop IDE. The following files in your project folder will be sent to the compile service:
-
-- Everything in the `/src` folder, including your `.ino` application file
-- The `project.properties` file for your project
-- Any libraries stored under `lib/<libraryname>/src`
+*5V relays must be powered from VUSB pin,  3V relays must be powered from 3V3 pin.

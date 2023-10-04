@@ -1,0 +1,20 @@
+{
+  "name": "libmfcc",
+  "keywords": "Audio, Processing, MFCC, frequency",
+  "description": "A library for computing MFCC coefficients from spectral data.",
+  "authors":
+  [
+    {
+      "name": "Alberto Sanchez",
+      "email": "alberto.sanchez@particle.io",
+      "maintainer": true
+    },
+    {
+      "name": "Rohith K D"
+    }
+  ],
+  "version": "0.1.0",
+  "frameworks": ["arduino","mbed","espidf"],
+  "platforms": "*",
+  "headers": "libmfcc.h"
+}
