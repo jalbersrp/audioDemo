@@ -31,21 +31,23 @@ unsigned int numFilters = 48;											//Number of filters to be applied
 const unsigned long MAX_RECORDING_LENGTH_MS = 5 * 1000;					//Limits the recording length if MODE button is not pressed again
 unsigned long recordingStart;											//Stores the start time for a recording
 //State machine
-enum State { STATE_WAITING, STATE_OPEN_FILE, STATE_RUNNING, STATE_FINISH, STATE_ANALYZE };		//State machine enums
+enum State { STATE_WAITING, STATE_OPEN_FILE, STATE_RUNNING, STATE_FINISH, STATE_FFT, STATE_MFCC};		//State machine enums
 State state = STATE_WAITING;											//Initial state of the state machine
 
 //FORWARD DECLARATIONS
 void buttonHandler(system_event_t event, int data);						//Event handler for MODE button (starts recording)
-int raiseTrigger(String extra);											//Event handler for triggering the record from cloud
-int relayControl(String state);
+int triggerSample(String extra);										//Event handler for triggering the record from cloud
+int triggerAnalysis(String extra);										//Event handler for triggering the local analysis from cloud
+int relayControl(String state);											//Event handler for controlling the relay
 bool openNewFile();														//Creates a new file and adds the headers
 
 //MAIN
 void setup()
 {
-	System.on(button_click, buttonHandler);								//Register handler to handle clicking on the SETUP button
-	Particle.function("audioSample", raiseTrigger);      				//Register a cloud function to start the target flashing
-	Particle.function("relayControl", relayControl);      				//Register a cloud function to start the target flashing
+	System.on(button_click, buttonHandler);								//Register handler for clicking the SETUP button
+	Particle.function("audioSample", triggerSample);      				//Register a cloud function to start a new sampling and perform FFT
+	Particle.function("analyzeCoeff", triggerAnalysis);					//Register a cloud function to trigger the MFCC analysis of the last sample
+	Particle.function("relayControl", relayControl);      				//Register a cloud function control the relay
 
 	pinMode(ledPin, OUTPUT);											//Recording indicator as output
 	digitalWrite(ledPin, LOW);											//Led off
@@ -75,6 +77,9 @@ void setup()
 
 void loop()
 {
+	byte preBuff[samples * 2];										//Prebuffer to store the samples from the file. Size is 2 bytes times samples
+	char buffer[44];												//Prebuffer to store the header of the wav file. 44 bytes in size.
+	
 	switch(state)
 	{
 	case STATE_WAITING:
@@ -115,10 +120,10 @@ void loop()
 		digitalWrite(ledPin, LOW);										//Led off
 		wavWriter.updateHeaderFromLength(&curFile);						//Updates the wav file header with the actual recording length
 		curFile.close();												//Closes the file
-		state = STATE_ANALYZE;											//Jump to analyze state
+		state = STATE_FFT;												//Jump to FFT compute state
 		break;
 
-	case STATE_ANALYZE:
+	case STATE_FFT:
 		//Performs FFT on the last file first samples 
 
 		//Opens the last file and gets the filename
@@ -127,7 +132,7 @@ void loop()
 			char name[14];
 			if (curFile.getName(name, sizeof(name)))
 			{
-				Log.info("Analyzing %s" , name);
+				Log.info("Computing FFT in %s" , name);
 			}
 			else
 			{
@@ -140,11 +145,9 @@ void loop()
 		}
         
 		//Reads the first 44 bytes (header) of the WAV file, does nothing with that. Just to bring the read pointer to where the data starts
-		char buffer[44];
 		curFile.read(buffer,44);
         
 		//.WAV data is stored on byte pairs (little endian)
-		byte preBuff[samples * 2];										//Prebuffer to store the samples from the file. Size is 2 bytes times samples
 		curFile.read(preBuff,samples * 2);								//Fills prebuffer with data from file
 		curFile.close();												//Closes the file
 		
@@ -174,6 +177,55 @@ void loop()
 		{
 			Log.info("Can't publish to cloud.");
 		}
+			
+		state = STATE_WAITING;											//Jumps to WAITING state
+		break;
+
+		case STATE_MFCC:
+		//Performs MFCC computing on the last file first samples 
+
+		//Opens the last file and gets the filename
+		if (sequentialFile.openFile(&curFile, false))
+		{
+			char name[14];
+			if (curFile.getName(name, sizeof(name)))
+			{
+				Log.info("Computing MFCC coeffs in %s" , name);
+			}
+			else
+			{
+				Log.info("Can't get file name.");
+			}
+		}
+		else
+		{
+			Log.info("Failed to open the file for analysis.");
+		}
+        
+		//Reads the first 44 bytes (header) of the WAV file, does nothing with that. Just to bring the read pointer to where the data starts
+		curFile.read(buffer,44);
+        
+		//.WAV data is stored on byte pairs (little endian)
+		curFile.read(preBuff,samples * 2);								//Fills prebuffer with data from file
+		curFile.close();												//Closes the file
+		
+		//Pass the data to the FFT samples buffer
+		for(int i=0;i<samples;i++)
+		{
+			vReal[i]=(int16_t)(((preBuff[(i*2)+1]<<8) + preBuff[i*2])/32768);	//Takes a pair of bytes, corrects endianess and converts it to double before storing
+			vImag[i]=0;													//Erases any last data stored here (last FFT process changed this data)
+		}
+		
+		//Performs FFT
+		//vReal				-	Array with real values of the samples taken
+		//vImag				-	Array with imaginary values (initialized as zeros)
+		//samples			-	Number of samples in the vReal array (must be power of 2)
+		//samplingFrequency	-	Sample rate of the data in vReal (samples/s)
+		//NOTE: The result is stored in the input array, the original sample values are destroyed
+		FFT = arduinoFFT(vReal, vImag, samples, samplingFrequency);		//Create FFT object from real/imaginary data sampled, number of samples and the sampling frequency
+		FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);				//Weights the data
+		FFT.Compute(FFT_FORWARD);										//Computes FFT
+		FFT.ComplexToMagnitude();										//Computes magnitudes from complex numbers
 
 		//Computes the specified MFCC coefficient
 		//vReal 			- 	Array of doubles containing the results of FFT computation. This data is already assumed to be purely real
@@ -183,12 +235,15 @@ void loop()
 		//coeff 			-	The mth MFCC coefficient to compute
 		double mfcc_result[coeffNumber];										//Initalizes the result coeff array
 		String s = "";															//Result string for publish. NOTE: Photon 2 publish field limit is 1024 characters
-		Log.info("MFCC results");
 		for(unsigned int coeff = 0; coeff < coeffNumber; coeff++)
 		{
 			mfcc_result[coeff] = GetCoefficient(vReal, samplingFrequency, numFilters, samples, coeff);
 			Log.info("Coeff %d: %f",coeff+1,mfcc_result[coeff]);
-			s = s + String::format("%f,", mfcc_result[coeff]);
+			s = s + String::format("%f", mfcc_result[coeff]);
+			if((coeff + 1) < coeffNumber)
+			{
+				s = s + ",";
+			}
 		}
 
 		//Publishes the coeffs to the cloud
@@ -206,10 +261,17 @@ void loop()
 //Functions
 
 //Handler for the cloud function that triggers the recording
-int raiseTrigger(String extra)
+int triggerSample(String extra)
 {
   //This function raises the flag to update the arduino board asset
   state = STATE_OPEN_FILE;
+  return 0;
+}
+
+int triggerAnalysis(String extra)
+{
+  //This function raises the flag to update the arduino board asset
+  state = STATE_MFCC;
   return 0;
 }
 
@@ -218,10 +280,12 @@ int relayControl(String state)
 	if(state == "ON")
 	{
 		digitalWrite(relayPin, LOW);
+		Log.info("Relay turned ON from cloud.");
 	}
 	if(state == "OFF")
 	{
 		digitalWrite(relayPin, HIGH);
+		Log.info("Relay turned OFF from cloud.");
 	}
 	return 0;
 }
