@@ -33,4 +33,22 @@ A1 | -|DAT|-
 A0 | -|CLK|-
 S4|-|-|S1|Input signal is inverted in the module (0V is ON)
 
-*5V relays must be powered from VUSB pin,  3V relays must be powered from 3V3 pin.
+*5V relays must be powered from VUSB pin,  3V relays not recommended if the module power source is the photon 2.
+
+## Server side
+This demo is intended to work along a webapp or some service in the cloud. The server would receive the `dFrequency` value and check if the dominantfrequency is between a preset value range. If the value is outside that range, the server can call `relayControl` to turn off the relay in the device.
+
+As an example, a node-red server was built. The node-red project file is included in the extras folder as `flows.json`. Particle provides a basic set of nodes for interfacing to the cloud.
+
+The instructions for setting up a nodered server can be [found here](https://nodered.org/#get-started).
+The instructions for setup and use the particle node-red integration can be [found here](https://docs.particle.io/reference/cloud-apis/node-red/).
+
+![Alt text](extras/image.png)
+
+The dFrequency node is sucribed to the particle event with the same name, it passes the received value to the switch node. In this exmaple the switch is cofigured to trigger a `relayControl` event to turn off the relay if the value is outside 390Hz - 410Hz.
+
+![Alt text](extras/image1.png)
+
+![Alt text](extras/image2.png)
+
+![Alt text](extras/image3.png)
